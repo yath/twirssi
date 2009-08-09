@@ -1032,7 +1032,7 @@ sub monitor_child {
     # pretend
 
     if ( open FILE, $filename ) {
-        bindmode FILE, ":utf8";
+        binmode FILE, ":utf8";
         my @lines;
         my %new_cache;
         while (<FILE>) {
