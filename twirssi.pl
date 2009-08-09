@@ -21,7 +21,7 @@ my ($REV) = '$Rev: 687 $' =~ /(\d+)/;
       . 'Can optionally set your bitlbee /away message to same',
     license => 'GNU GPL v2',
     url     => 'http://twirssi.com',
-    changed => '$Date: 2009-08-07 01:24:53 -0700 (Fri, 07 Aug 2009) $',
+    changed => '$Date: 2009-07-22 13:58:05 -0700 (Wed, 22 Jul 2009) $',
 );
 
 my $window;
@@ -715,8 +715,8 @@ sub load_friends {
     eval {
         while (1)
         {
-            print $fh "type:debug Loading friends page $page...\n"
-              if ( $fh and &debug );
+            tell_parent($fh, { type => "debug" }, "Loading friends page $page...")
+              if ($fh and &debug);
             my $friends = $twit->friends( { page => $page } );
             last unless $friends;
             $new_friends{ $_->{screen_name} } = time foreach @$friends;
@@ -726,19 +726,20 @@ sub load_friends {
     };
 
     if ($@) {
-        print $fh "type:debug Error during friends list update.  Aborted.\n";
+        tell_parent($fh, { type => "debug" }, "Error during friends list update.  Aborted.");
         return;
     }
 
     my ( $added, $removed ) = ( 0, 0 );
-    print $fh "type:debug Scanning for new friends...\n" if ( $fh and &debug );
+    tell_parent($fh, { type => "debug" }, "Scanning for new friends...")
+      if ($fh and &debug);
     foreach ( keys %new_friends ) {
         next if exists $friends{$_};
         $friends{$_} = time;
         $added++;
     }
 
-    print $fh "type:debug Scanning for removed friends...\n"
+    tell_parent($fh, { type => "debug" }, "Scanning for removed friends...")
       if ( $fh and &debug );
     foreach ( keys %friends ) {
         next if exists $new_friends{$_};
@@ -784,31 +785,31 @@ sub get_updates {
             $error++ unless &do_updates( $fh, $_, $twits{$_}, \%context_cache );
         }
 
-        print $fh "__friends__\n";
+        tell_parent($fh, {}, "__friends__");
         if (
             time - $last_friends_poll >
             Irssi::settings_get_int('twitter_friends_poll') )
         {
-            print $fh "__updated ", time, "\n";
+            tell_parent($fh, {}, "__updated ".time);
             my ( $added, $removed ) = &load_friends($fh);
             if ( $added + $removed ) {
-                print $fh "type:debug %R***%n Friends list updated: ",
+                tell_parent($fh, { type => "debug" }, "%R***%n Friends list updated: ".
                   join( ", ",
                     sprintf( "%d added",   $added ),
-                    sprintf( "%d removed", $removed ) ),
-                  "\n";
+                    sprintf( "%d removed", $removed ) )
+                );
             }
         }
 
         foreach ( sort keys %friends ) {
-            print $fh "$_ $friends{$_}\n";
+            tell_parent($fh, {}, "$_ $friends{$_}");
         }
 
         if ($error) {
-            print $fh "type:debug Update encountered errors.  Aborted\n";
-            print $fh "-- $last_poll";
+            tell_parent($fh, { type => "debug" }, "Update encountered errors.  Aborted");
+            tell_parent($fh, {}, "-- $last_poll");
         } else {
-            print $fh "-- $new_poll";
+            tell_parent($fh, {}, "-- $new_poll");
         }
         close $fh;
         rename $filename, "$filename.done";
@@ -841,8 +842,8 @@ sub do_updates {
     };
 
     if ($@) {
-        print $fh "type:debug Error during friends_timeline call: Aborted.\n";
-        print $fh "type:debug : $_\n" foreach split /\n/, Dumper($@);
+        tell_parent($fh, { type => "debug" }, "Error during friends_timeline call: Aborted.");
+        tell_parent($fh, { type => "debug" }, ": $_") foreach split /\n/, Dumper($@);
         return undef;
     }
 
@@ -851,13 +852,11 @@ sub do_updates {
             my $error = "Unknown error";
             eval { $error = JSON::Any->jsonToObj( $obj->get_error() ) };
             unless ($@) { $error = $obj->get_error() }
-            print $fh
-              "type:debug API Error during friends_timeline call: Aborted\n";
-            print $fh "type:debug : $_\n" foreach split /\n/, Dumper($error);
+            tell_parent($fh, { type => "debug" }, "API Error during friends_timeline call: Aborted");
+            tell_parent($fh, { type => "debug" }, ": $_") foreach split /\n/, Dumper($error);
 
         } else {
-            print $fh
-              "type:debug API Error during friends_timeline call. Aborted.\n";
+            tell_parent($fh, { type => "debug"  }, "API Error during friends_timeline call. Aborted.");
         }
         return undef;
     }
@@ -890,9 +889,13 @@ sub do_updates {
                         " -- http://twitter.com/$context->{user}{screen_name}"
                       . "/status/$context->{id}";
                 }
-                printf $fh "id:%u account:%s nick:%s type:tweet %s\n",
-                  $context->{id}, $username,
-                  $context->{user}{screen_name}, $ctext;
+                tell_parent($fh, {
+                    id      => $context->{id},
+                    account => $username,
+                    nick    => $context->{user}{screen_name},
+                    type    => "tweet"
+                  }, $ctext);
+
                 $reply = "reply";
             }
         }
@@ -903,12 +906,18 @@ sub do_updates {
             $text .= " -- http://twitter.com/$t->{user}{screen_name}"
               . "/status/$t->{id}";
         }
-        printf $fh "id:%u account:%s nick:%s type:%s %s\n",
-          $t->{id}, $username, $t->{user}{screen_name}, $reply, $text;
-        $new_poll_id = $t->{id} if $new_poll_id < $t->{id};
+        tell_parent($fh, {
+            id => $t->{id},
+            account => $username,
+            nick => $t->{user}{screen_name},
+            type => $reply },
+          $text);
+
+    $new_poll_id = $t->{id} if $new_poll_id < $t->{id};
     }
-    printf $fh "id:%u account:%s type:last_id timeline\n",
-      $new_poll_id, $username;
+
+    tell_parent($fh, { id => $new_poll_id, account => $username,
+        type => "last_id" }, "timeline");
 
     print scalar localtime, " - Polling for replies" if &debug;
     $new_poll_id = 0;
@@ -924,7 +933,7 @@ sub do_updates {
     };
 
     if ($@) {
-        print $fh "type:debug Error during replies call.  Aborted.\n";
+        tell_parent($fh, { type => "debug" }, "Error during replies call.  Aborted.");
         return undef;
     }
 
@@ -938,8 +947,12 @@ sub do_updates {
             $text .= " -- http://twitter.com/$t->{user}{screen_name}"
               . "/status/$t->{id}";
         }
-        printf $fh "id:%u account:%s nick:%s type:tweet %s\n",
-          $t->{id}, $username, $t->{user}{screen_name}, $text;
+        tell_parent($fh, {
+            id      => $t->{id},
+            account => $username,
+            nick    => $t->{user}{screen_name},
+            type    => "tweet"
+          }, $text);
         $new_poll_id = $t->{id} if $new_poll_id < $t->{id};
     }
     printf $fh "id:%u account:%s type:last_id reply\n", $new_poll_id, $username;
@@ -958,25 +971,34 @@ sub do_updates {
     };
 
     if ($@) {
-        print $fh "type:debug Error during direct_messages call.  Aborted.\n";
+        tell_parent($fh, { type => "debug" }, "Error during direct_messages call.  Aborted.");
         return undef;
     }
 
     foreach my $t ( reverse @$tweets ) {
         my $text = decode_entities( $t->{text} );
         $text =~ s/[\n\r]/ /g;
-        printf $fh "id:%u account:%s nick:%s type:dm %s\n",
-          $t->{id}, $username, $t->{sender_screen_name}, $text;
+        tell_parent($fh, {
+            id      => $t->{id},
+            account => $username,
+            nick    => $t->{sender_screen_name},
+            type    => "dm"
+          }, $text);
+
         $new_poll_id = $t->{id} if $new_poll_id < $t->{id};
     }
-    printf $fh "id:%u account:%s type:last_id dm\n", $new_poll_id, $username;
+    tell_parent($fh, {
+        id      => $new_poll_id,
+        account => $username,
+        type    => "last_id",
+      }, "dm");
 
     print scalar localtime, " - Polling for subscriptions" if &debug;
     if ( $obj->can('search') and $id_map{__searches}{$username} ) {
         my $search;
         foreach my $topic ( sort keys %{ $id_map{__searches}{$username} } ) {
-            print $fh "type:debug searching for $topic since ",
-              "$id_map{__searches}{$username}{$topic}\n";
+            tell_parent($fh, { type => "debug" }, "searching for $topic since ".
+              "$id_map{__searches}{$username}{$topic}");
             eval {
                 $search = $obj->search(
                     {
@@ -987,26 +1009,33 @@ sub do_updates {
             };
 
             if ($@) {
-                print $fh
-                  "type:debug Error during search($topic) call.  Aborted.\n";
+                tell_parent($fh, { type => "debug" }, "Error during search($topic) call.  Aborted.");
                 return undef;
             }
 
             unless ( $search->{max_id} ) {
-                print $fh "type:debug Invalid search results when searching",
-                  " for $topic. Aborted.\n";
+                tell_parent($fh,  { type => "debug" }, "Invalid search results when searching ".
+                                                       "for $topic. Aborted.");
                 return undef;
             }
 
             $id_map{__searches}{$username}{$topic} = $search->{max_id};
-            printf $fh "id:%u account:%s type:searchid topic:%s\n",
-              $search->{max_id}, $username, $topic;
+            tell_parent($fh, {
+                id      => $search->{max_id},
+                account => $username,
+                type    => "searchid",
+                topic   => $topic });
 
             foreach my $t ( reverse @{ $search->{results} } ) {
                 my $text = decode_entities( $t->{text} );
                 $text =~ s/[\n\r]/ /g;
-                printf $fh "id:%u account:%s nick:%s type:search topic:%s %s\n",
-                  $t->{id}, $username, $t->{from_user}, $topic, $text;
+                tell_parent($fh, {
+                    id      => $t->{id},
+                    account => $username,
+                    nick    => $t->{from_user},
+                    type    => "search",
+                    topic   => $topic
+                  }, $text);
                 $new_poll_id = $t->{id}
                   if not $new_poll_id
                       or $t->{id} < $new_poll_id;
@@ -1017,6 +1046,20 @@ sub do_updates {
     print scalar localtime, " - Done" if &debug;
 
     return 1;
+}
+
+sub tell_parent {
+    my ($fh, $meta, $data) = @_;
+
+    my @meta;
+    while (my ($key, $val) = each %$meta) {
+        $val = sprintf('%u', $val) if $key eq "id";
+        push(@meta, "$key:$val");
+    }
+
+    my $ret = join(" ", @meta);
+    $ret .= (@meta?" ":"").$data if $data;
+    print $fh $ret."\n";
 }
 
 sub monitor_child {
@@ -1045,10 +1088,8 @@ sub monitor_child {
             my $hilight = 0;
             my %meta;
 
-            foreach my $key (qw/id account nick type topic/) {
-                if (s/^$key:(\S+)\s*//) {
-                    $meta{$key} = $1;
-                }
+            while (s/^(id|account|nick|type|topic):(\S+)\s*//) {
+                $meta{$1} = $2;
             }
 
             if ( not $meta{type} or $meta{type} !~ /searchid|last_id/ ) {
